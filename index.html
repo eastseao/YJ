@@ -31,7 +31,7 @@
       radial-gradient(circle at 85% 90%, rgba(185,138,46,0.06), transparent 40%);
   }
 
-  .header { text-align: center; margin-bottom: 28px; }
+  .header { text-align: center; margin-bottom: 22px; }
   .header h1 {
     font-size: 40px;
     letter-spacing: 12px;
@@ -49,6 +49,34 @@
     color: var(--accent);
     font-size: 14px;
     letter-spacing: 1px;
+  }
+
+  /* 模式切换 */
+  .modes {
+    margin-top: 18px;
+    display: inline-flex;
+    background: #efe7d4;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px;
+    gap: 4px;
+  }
+  .mode-btn {
+    font-family: inherit;
+    font-size: 15px;
+    letter-spacing: 2px;
+    color: var(--ink-soft);
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 22px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+  .mode-btn.active {
+    color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    box-shadow: 0 4px 10px rgba(163,51,39,0.25);
   }
 
   .stage {
@@ -155,16 +183,6 @@
     display: block;
   }
   .yao-line.show { opacity: 1; transform: scaleX(1); }
-  .yao-cap {
-    display: flex;
-    flex-direction: column-reverse;
-    gap: 7px;
-    margin-right: 12px;
-  }
-  .yao-cap span {
-    height: 15px; line-height: 15px;
-    font-size: 11px; color: var(--ink-soft);
-  }
 
   /* 右侧 */
   .right { flex: 1 1 400px; max-width: 460px; }
@@ -187,6 +205,17 @@
   .gua-symbol { font-size: 78px; line-height: 1; color: var(--accent); }
   .gua-name { font-size: 40px; letter-spacing: 6px; font-weight: 700; }
   .gua-meta { color: var(--ink-soft); font-size: 14px; margin-top: 6px; letter-spacing: 1px; }
+  .gua-source {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    border: 1px solid #e3c9b0;
+    background: #fbf1e4;
+    border-radius: 6px;
+    padding: 1px 10px;
+  }
 
   .gua-body { margin-top: 18px; }
   .block { margin-bottom: 16px; }
@@ -229,11 +258,15 @@
     <h1>每日卜卦</h1>
     <div class="sub">—— 周易 · 六十四卦 ——</div>
     <div class="date" id="today"></div>
+    <div class="modes">
+      <button class="mode-btn active" data-mode="daily">每日一卦</button>
+      <button class="mode-btn" data-mode="random">随机起卦</button>
+    </div>
   </div>
 
   <div class="stage">
     <div class="panel left">
-      <button class="btn" id="startBtn">开 始</button>
+      <button class="btn" id="startBtn">查看今日卦</button>
 
       <div class="digits" id="digits">
         <div class="digit">–</div><div class="digit">–</div><div class="digit">–</div>
@@ -254,12 +287,12 @@
     <div class="panel right empty" id="rightPanel">
       <div class="placeholder">
         <span class="glyph">䷀</span>
-        点击「开始」，诚心起卦
+        点击「查看今日卦」，诚心起卦
       </div>
     </div>
   </div>
 
-  <div class="footer">六十四卦 · 起卦随机 0–63，对应文王卦序 · 卦辞据《周易》通行本</div>
+  <div class="footer">六十四卦 · 每日一卦按当日日期定卦 · 随机起卦 0–63 对应文王卦序 · 卦辞据《周易》通行本</div>
 
 <script>
   // 六十四卦数据（文王序）。yao 为六爻，自下而上，1=阳 0=阴。
@@ -332,9 +365,11 @@
 
   const digitEls = Array.from(document.querySelectorAll(".digit"));
   const yaoEls = Array.from(document.querySelectorAll(".yao-line"));
-  const hexagram = document.getElementById("hexagram");
   const rightPanel = document.getElementById("rightPanel");
   const startBtn = document.getElementById("startBtn");
+  const modeBtns = Array.from(document.querySelectorAll(".mode-btn"));
+
+  let mode = "daily";   // daily | random
 
   // 日期
   const now = new Date();
@@ -342,24 +377,32 @@
   document.getElementById("today").textContent =
     `${now.getFullYear()} 年 ${now.getMonth()+1} 月 ${now.getDate()} 日 · 星期${week}`;
 
-  // 爻图方向：爻列自下而上（初爻在底部）。SVG/div 用 flex column-reverse 已处理，
-  // yaoEls 顺序为 [初,二,三,四,五,上]（DOM 中初爻在最后，但 column-reverse 显示在底部）。
-  // 这里统一：yaoEls[i] 对应 yao 字符串第 i 位（i=0 初爻）。
+  // 每日一卦：以年月日为种子，FNV-1a 哈希映射到 0–63，当天恒定、跨天变化。
+  function dailyIndex() {
+    const d = new Date();
+    const key = `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h % 64;
+  }
 
-  function renderGua(g) {
-    // 数字
+  function updateBtnLabel() {
+    startBtn.textContent = mode === "daily" ? "查看今日卦" : "随机起卦";
+  }
+
+  function renderGua(g, sourceLabel) {
     const bits = g.yao.split("");
     bits.forEach((b, i) => {
       digitEls[i].textContent = b;
       digitEls[i].classList.toggle("on", b === "1");
     });
-    // 爻图
     bits.forEach((b, i) => {
-      const el = yaoEls[i];
-      el.classList.toggle("yin", b === "0");
-      el.classList.add("show");
+      yaoEls[i].classList.toggle("yin", b === "0");
+      yaoEls[i].classList.add("show");
     });
-    // 右侧
     rightPanel.classList.remove("empty");
     rightPanel.innerHTML = `
       <div class="gua-head">
@@ -367,6 +410,7 @@
         <div>
           <div class="gua-name">${g.name}卦</div>
           <div class="gua-meta">第 ${g.n} 卦 · ${g.up}上 ${g.dn}下</div>
+          <span class="gua-source">${sourceLabel}</span>
         </div>
       </div>
       <div class="gua-body">
@@ -385,14 +429,15 @@
     digitEls.forEach(el => { el.textContent = "–"; el.classList.remove("on"); });
     yaoEls.forEach(el => { el.classList.remove("show", "yin"); });
     rightPanel.classList.add("empty");
-    rightPanel.innerHTML = `<div class="placeholder"><span class="glyph">䷀</span>点击「开始」，诚心起卦</div>`;
+    rightPanel.innerHTML = `<div class="placeholder"><span class="glyph">䷀</span>${mode === "daily" ? "点击「查看今日卦」，诚心起卦" : "点击「随机起卦」，诚心起卦"}</div>`;
   }
 
   function start() {
     startBtn.disabled = true;
     resetVisual();
 
-    const target = Math.floor(Math.random() * 64);   // 0–63
+    const target = mode === "daily" ? dailyIndex() : Math.floor(Math.random() * 64);
+    const sourceLabel = mode === "daily" ? "今日之卦" : "随机起卦";
     const finalBits = target.toString(2).padStart(6, "0").split("");
     const g = GUA[target];
 
@@ -411,26 +456,43 @@
       });
       if (tick >= total) {
         clearInterval(timer);
-        // 定格
         finalBits.forEach((b, i) => {
           digitEls[i].textContent = b;
           digitEls[i].classList.toggle("on", b === "1");
         });
-        // 爻逐条显现
         finalBits.forEach((b, i) => {
           setTimeout(() => {
             yaoEls[i].classList.toggle("yin", b === "0");
             yaoEls[i].classList.add("show");
           }, i * 140);
         });
-        // 右侧结果
-        setTimeout(() => renderGua(g), finalBits.length * 140 + 120);
+        setTimeout(() => renderGua(g, sourceLabel), finalBits.length * 140 + 120);
         setTimeout(() => { startBtn.disabled = false; }, finalBits.length * 140 + 300);
       }
     }, 60);
   }
 
+  function setMode(m) {
+    if (m === mode) {
+      // 同模式再点仍可重新起卦（每日一卦结果不变，随机则重摇）
+      start();
+      return;
+    }
+    mode = m;
+    modeBtns.forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+    updateBtnLabel();
+    if (m === "daily") {
+      start();               // 自动展示今日卦
+    } else {
+      resetVisual();         // 随机模式清空，等待点击
+    }
+  }
+
+  modeBtns.forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
   startBtn.addEventListener("click", start);
+
+  // 默认「每日一卦」：打开即展示今日卦
+  start();
 </script>
 </body>
 </html>
