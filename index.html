@@ -242,6 +242,27 @@
     padding: 10px 14px;
   }
 
+  /* 动爻高亮 */
+  .yao-line.moving { background: var(--accent); }
+  .yao-line.moving.yin { background: transparent; }
+  .yao-line.moving.yin::before, .yao-line.moving.yin::after { background: var(--accent); }
+
+  /* 变卦卡片 */
+  .block.change .change-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    border: 1px dashed #d9b08a;
+    background: #fbf7ee;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .change-card .c-sym { font-size: 44px; line-height: 1; color: var(--accent); }
+  .change-card .c-info { flex: 1; }
+  .change-card .c-name { font-size: 17px; letter-spacing: 1px; font-weight: 700; color: var(--ink); }
+  .change-card .c-move { font-size: 13px; color: var(--accent); margin-top: 3px; }
+  .change-card .c-bai { font-size: 14px; color: var(--ink-soft); margin-top: 6px; line-height: 1.6; }
+
   /* 历史记录 */
   .history-panel {
     width: 100%;
@@ -455,8 +476,8 @@
   document.getElementById("today").textContent =
     `${now.getFullYear()} 年 ${now.getMonth()+1} 月 ${now.getDate()} 日 · 星期${week}`;
 
-  // 每日一卦：以年月日为种子，FNV-1a 哈希映射到 0–63，当天恒定、跨天变化。
-  function dailyIndex() {
+  // 每日一卦：以年月日为种子，FNV-1a 哈希，当天恒定、跨天变化。
+  function dailyHash() {
     const d = new Date();
     const key = `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
     let h = 2166136261 >>> 0;
@@ -464,23 +485,60 @@
       h ^= key.charCodeAt(i);
       h = Math.imul(h, 16777619) >>> 0;
     }
-    return h % 64;
+    return h;
+  }
+  function dailyIndex() { return dailyHash() % 64; }
+  function dailyMove() { return (Math.floor(dailyHash() / 64) % 6) + 1; }
+
+  // 六爻字符串 → 卦 的映射（用于查变卦）
+  const GUA_BY_YAO = {};
+  GUA.forEach(g => { GUA_BY_YAO[g.yao] = g; });
+
+  // 动爻翻转：pos 1–6（1=初爻），翻转该位阴阳得变卦六爻
+  function flipYao(yaoStr, pos) {
+    const bits = yaoStr.split("");
+    const idx = pos - 1;
+    bits[idx] = bits[idx] === "1" ? "0" : "1";
+    return bits.join("");
   }
 
   function updateBtnLabel() {
     startBtn.textContent = mode === "daily" ? "查看今日卦" : "随机起卦";
   }
 
-  function renderGua(g, sourceLabel) {
+  function renderGua(g, sourceLabel, info) {
     const bits = g.yao.split("");
     bits.forEach((b, i) => {
       digitEls[i].textContent = b;
       digitEls[i].classList.toggle("on", b === "1");
     });
     bits.forEach((b, i) => {
-      yaoEls[i].classList.toggle("yin", b === "0");
-      yaoEls[i].classList.add("show");
+      const el = yaoEls[i];
+      el.classList.toggle("yin", b === "0");
+      el.classList.toggle("moving", info && i === info.movePos - 1);
+      el.classList.add("show");
     });
+
+    let changeHtml = "";
+    if (info && info.changedG) {
+      const yaoNames = ["初爻","二爻","三爻","四爻","五爻","上爻"];
+      const yaoName = yaoNames[info.movePos - 1];
+      const mark = g.yao[info.movePos - 1] === "1" ? "○" : "×";
+      const cg = info.changedG;
+      changeHtml = `
+        <div class="block change">
+          <span class="tag">变 卦</span>
+          <div class="change-card">
+            <span class="c-sym">${cg.s}</span>
+            <div class="c-info">
+              <div class="c-name">${cg.name}卦 · 第 ${cg.n} 卦 · ${cg.up}上${cg.dn}下</div>
+              <div class="c-move">本卦${yaoName}动（${mark}）而变</div>
+              <div class="c-bai">${cg.bai}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+
     rightPanel.classList.remove("empty");
     rightPanel.innerHTML = `
       <div class="gua-head">
@@ -504,6 +562,7 @@
           <span class="tag">白话解读</span>
           <div class="val">${g.bai}</div>
         </div>
+        ${changeHtml}
       </div>`;
   }
 
@@ -520,14 +579,14 @@
     const p = n => String(n).padStart(2, "0");
     return `${d.getMonth()+1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
-  function recordHistory(g, sourceLabel) {
+  function recordHistory(g, sourceLabel, movePos, changedG) {
     const list = loadHistory();
     const src = sourceLabel === "今日之卦" ? "今日" : "随机";
     const last = list[0];
-    if (last && last.n === g.n && last.src === src) {
-      last.t = Date.now();               // 去重：同一卦同来源，仅更新时间
+    if (last && last.n === g.n && last.src === src && last.move === movePos) {
+      last.t = Date.now();               // 去重：同一卦同来源同动爻，仅更新时间
     } else {
-      list.unshift({ t: Date.now(), n: g.n, name: g.name, s: g.s, yao: g.yao, src });
+      list.unshift({ t: Date.now(), n: g.n, name: g.name, s: g.s, yao: g.yao, src, move: movePos, cname: changedG.name });
     }
     if (list.length > 30) list.length = 30;
     saveHistory(list);
@@ -545,7 +604,7 @@
         <div class="h-sym">${r.s}</div>
         <div>
           <div class="h-name">${r.name}卦</div>
-          <div class="h-meta">第 ${r.n} 卦</div>
+          <div class="h-meta">第 ${r.n} 卦${r.cname ? " · 变 " + r.cname + "卦" : ""}</div>
         </div>
         <div class="h-right">
           <span class="h-src">${r.src === "今日" ? "今日之卦" : "随机起卦"}</span>
@@ -561,12 +620,14 @@
   }
   function viewHistory(rec) {
     const g = GUA[rec.n - 1];
-    renderGua(g, rec.src === "今日" ? "今日之卦" : "随机起卦");
+    const movePos = rec.move || 1;
+    const changedG = GUA_BY_YAO[flipYao(g.yao, movePos)];
+    renderGua(g, rec.src === "今日" ? "今日之卦" : "随机起卦", { movePos, changedG });
   }
 
   function resetVisual() {
     digitEls.forEach(el => { el.textContent = "–"; el.classList.remove("on"); });
-    yaoEls.forEach(el => { el.classList.remove("show", "yin"); });
+    yaoEls.forEach(el => { el.classList.remove("show", "yin", "moving"); });
     rightPanel.classList.add("empty");
     rightPanel.innerHTML = `<div class="placeholder"><span class="glyph">䷀</span>${mode === "daily" ? "点击「查看今日卦」，诚心起卦" : "点击「随机起卦」，诚心起卦"}</div>`;
   }
@@ -575,10 +636,18 @@
     startBtn.disabled = true;
     resetVisual();
 
-    const target = mode === "daily" ? dailyIndex() : Math.floor(Math.random() * 64);
+    let target, movePos;
+    if (mode === "daily") {
+      target = dailyIndex();
+      movePos = dailyMove();
+    } else {
+      target = Math.floor(Math.random() * 64);
+      movePos = Math.floor(Math.random() * 6) + 1;
+    }
     const sourceLabel = mode === "daily" ? "今日之卦" : "随机起卦";
-    const finalBits = target.toString(2).padStart(6, "0").split("");
     const g = GUA[target];
+    const finalBits = g.yao.split("");               // 直接用卦的六爻
+    const changedG = GUA_BY_YAO[flipYao(g.yao, movePos)];
 
     // 滚动特效：快速随机翻动数字
     let tick = 0;
@@ -605,7 +674,10 @@
             yaoEls[i].classList.add("show");
           }, i * 140);
         });
-        setTimeout(() => { renderGua(g, sourceLabel); recordHistory(g, sourceLabel); }, finalBits.length * 140 + 120);
+        setTimeout(() => {
+          renderGua(g, sourceLabel, { movePos, changedG });
+          recordHistory(g, sourceLabel, movePos, changedG);
+        }, finalBits.length * 140 + 120);
         setTimeout(() => { startBtn.disabled = false; }, finalBits.length * 140 + 300);
       }
     }, 60);
