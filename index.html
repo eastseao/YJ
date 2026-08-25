@@ -242,6 +242,66 @@
     padding: 10px 14px;
   }
 
+  /* 历史记录 */
+  .history-panel {
+    width: 100%;
+    max-width: 960px;
+    margin-top: 24px;
+  }
+  .hist-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .hist-title {
+    font-size: 18px;
+    letter-spacing: 3px;
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .hist-clear {
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--ink-soft);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .hist-clear:hover { color: var(--accent); border-color: #d9b08a; background: #fbf1e4; }
+  .hist-list { display: flex; flex-direction: column; gap: 8px; }
+  .hist-empty { color: var(--ink-soft); opacity: 0.6; text-align: center; padding: 16px 0; font-size: 14px; }
+  .hist-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fffdf7;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .hist-item:hover { border-color: #d9b08a; background: #fdf6ec; transform: translateY(-1px); }
+  .hist-item .h-sym { font-size: 30px; line-height: 1; color: var(--accent); }
+  .hist-item .h-name { font-size: 18px; letter-spacing: 2px; font-weight: 700; }
+  .hist-item .h-meta { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .hist-item .h-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .hist-item .h-src {
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    border: 1px solid #e3c9b0;
+    background: #fbf1e4;
+    border-radius: 6px;
+    padding: 1px 8px;
+  }
+  .hist-item .h-time { font-size: 12px; color: var(--ink-soft); }
+
   .footer {
     margin-top: 30px;
     color: var(--ink-soft);
@@ -297,6 +357,16 @@
         <span class="glyph">䷀</span>
         点击「查看今日卦」，诚心起卦
       </div>
+    </div>
+  </div>
+
+  <div class="panel history-panel" id="historyPanel">
+    <div class="hist-head">
+      <span class="hist-title">历史记录</span>
+      <button class="hist-clear" id="clearBtn">清空</button>
+    </div>
+    <div class="hist-list" id="histList">
+      <div class="hist-empty">暂无记录，起卦后会自动保存在这里</div>
     </div>
   </div>
 
@@ -437,6 +507,63 @@
       </div>`;
   }
 
+  // ===== 历史记录（localStorage） =====
+  function loadHistory() {
+    try { return JSON.parse(localStorage.getItem("gua_history") || "[]"); }
+    catch (e) { return []; }
+  }
+  function saveHistory(list) {
+    localStorage.setItem("gua_history", JSON.stringify(list));
+  }
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getMonth()+1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function recordHistory(g, sourceLabel) {
+    const list = loadHistory();
+    const src = sourceLabel === "今日之卦" ? "今日" : "随机";
+    const last = list[0];
+    if (last && last.n === g.n && last.src === src) {
+      last.t = Date.now();               // 去重：同一卦同来源，仅更新时间
+    } else {
+      list.unshift({ t: Date.now(), n: g.n, name: g.name, s: g.s, yao: g.yao, src });
+    }
+    if (list.length > 30) list.length = 30;
+    saveHistory(list);
+    renderHistory();
+  }
+  function renderHistory() {
+    const list = loadHistory();
+    const box = document.getElementById("histList");
+    if (!list.length) {
+      box.innerHTML = `<div class="hist-empty">暂无记录，起卦后会自动保存在这里</div>`;
+      return;
+    }
+    box.innerHTML = list.map((r, idx) => `
+      <div class="hist-item" data-idx="${idx}">
+        <div class="h-sym">${r.s}</div>
+        <div>
+          <div class="h-name">${r.name}卦</div>
+          <div class="h-meta">第 ${r.n} 卦</div>
+        </div>
+        <div class="h-right">
+          <span class="h-src">${r.src === "今日" ? "今日之卦" : "随机起卦"}</span>
+          <span class="h-time">${fmtTime(r.t)}</span>
+        </div>
+      </div>`).join("");
+    box.querySelectorAll(".hist-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const r = list[Number(el.dataset.idx)];
+        viewHistory(r);
+      });
+    });
+  }
+  function viewHistory(rec) {
+    const g = GUA[rec.n - 1];
+    renderGua(g, rec.src === "今日" ? "今日之卦" : "随机起卦");
+  }
+
   function resetVisual() {
     digitEls.forEach(el => { el.textContent = "–"; el.classList.remove("on"); });
     yaoEls.forEach(el => { el.classList.remove("show", "yin"); });
@@ -478,7 +605,7 @@
             yaoEls[i].classList.add("show");
           }, i * 140);
         });
-        setTimeout(() => renderGua(g, sourceLabel), finalBits.length * 140 + 120);
+        setTimeout(() => { renderGua(g, sourceLabel); recordHistory(g, sourceLabel); }, finalBits.length * 140 + 120);
         setTimeout(() => { startBtn.disabled = false; }, finalBits.length * 140 + 300);
       }
     }, 60);
@@ -502,6 +629,13 @@
 
   modeBtns.forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
   startBtn.addEventListener("click", start);
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    localStorage.removeItem("gua_history");
+    renderHistory();
+  });
+
+  // 初始渲染历史
+  renderHistory();
 
   // 默认「每日一卦」：打开即展示今日卦
   start();
