@@ -247,6 +247,16 @@
   .yao-line.moving.yin { background: transparent; }
   .yao-line.moving.yin::before, .yao-line.moving.yin::after { background: var(--accent); }
 
+  /* 动爻说明 */
+  .hex-move {
+    margin-top: 10px;
+    min-height: 18px;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--accent);
+    text-align: center;
+  }
+
   /* 变卦卡片 */
   .block.change .change-card {
     display: flex;
@@ -370,6 +380,7 @@
           <div class="yao-line"></div><div class="yao-line"></div><div class="yao-line"></div>
           <div class="yao-line"></div><div class="yao-line"></div><div class="yao-line"></div>
         </div>
+        <div class="hex-move" id="hexMove"></div>
       </div>
     </div>
 
@@ -487,19 +498,62 @@
     }
     return h;
   }
-  function dailyIndex() { return dailyHash() % 64; }
-  function dailyMove() { return (Math.floor(dailyHash() / 64) % 6) + 1; }
 
-  // 六爻字符串 → 卦 的映射（用于查变卦）
+  // 确定性伪随机（mulberry32），用于每日固定起卦
+  function seededRandom(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // 六爻字符串 → 卦 的映射（用于查本卦/变卦）
   const GUA_BY_YAO = {};
   GUA.forEach(g => { GUA_BY_YAO[g.yao] = g; });
 
-  // 动爻翻转：pos 1–6（1=初爻），翻转该位阴阳得变卦六爻
-  function flipYao(yaoStr, pos) {
+  // 翻转多个动爻得变卦六爻
+  function flipMulti(yaoStr, moves) {
     const bits = yaoStr.split("");
-    const idx = pos - 1;
-    bits[idx] = bits[idx] === "1" ? "0" : "1";
+    moves.forEach(pos => {
+      const idx = pos - 1;
+      bits[idx] = bits[idx] === "1" ? "0" : "1";
+    });
     return bits.join("");
+  }
+
+  // 摇一爻：阴阳各半，动爻概率 1/4（对应金钱卦老阳9/老阴6 各 1/8）
+  function castOne(rnd) {
+    const yang = rnd() < 0.5;
+    const moving = rnd() < 0.25;
+    return { y: yang ? "1" : "0", moving };
+  }
+
+  // 随机起卦：返回 { yao, moves }
+  function castHex() {
+    let yao = "";
+    const moves = [];
+    for (let i = 1; i <= 6; i++) {
+      const r = castOne(Math.random);
+      yao += r.y;
+      if (r.moving) moves.push(i);
+    }
+    return { yao, moves };
+  }
+
+  // 每日固定起卦
+  function dailyCast() {
+    const rnd = seededRandom(dailyHash());
+    let yao = "";
+    const moves = [];
+    for (let i = 1; i <= 6; i++) {
+      const r = castOne(rnd);
+      yao += r.y;
+      if (r.moving) moves.push(i);
+    }
+    return { yao, moves };
   }
 
   function updateBtnLabel() {
@@ -507,6 +561,8 @@
   }
 
   function renderGua(g, sourceLabel, info) {
+    const yaoNames = ["初爻","二爻","三爻","四爻","五爻","上爻"];
+    const moves = (info && info.moves) || [];
     const bits = g.yao.split("");
     bits.forEach((b, i) => {
       digitEls[i].textContent = b;
@@ -515,16 +571,26 @@
     bits.forEach((b, i) => {
       const el = yaoEls[i];
       el.classList.toggle("yin", b === "0");
-      el.classList.toggle("moving", info && i === info.movePos - 1);
+      el.classList.toggle("moving", moves.includes(i + 1));
       el.classList.add("show");
     });
 
+    // 动爻说明
+    let moveText = "";
+    if (info) {
+      if (moves.length) {
+        moveText = "动爻：" + moves.map(p => yaoNames[p-1] + (g.yao[p-1] === "1" ? "○" : "×")).join("、");
+      } else {
+        moveText = "六爻皆静 · 静卦";
+      }
+    }
+    document.getElementById("hexMove").textContent = moveText;
+
+    // 变卦卡片
     let changeHtml = "";
-    if (info && info.changedG) {
-      const yaoNames = ["初爻","二爻","三爻","四爻","五爻","上爻"];
-      const yaoName = yaoNames[info.movePos - 1];
-      const mark = g.yao[info.movePos - 1] === "1" ? "○" : "×";
+    if (info && moves.length && info.changedG) {
       const cg = info.changedG;
+      const moveDesc = moves.map(p => yaoNames[p-1]).join("、");
       changeHtml = `
         <div class="block change">
           <span class="tag">变 卦</span>
@@ -532,8 +598,19 @@
             <span class="c-sym">${cg.s}</span>
             <div class="c-info">
               <div class="c-name">${cg.name}卦 · 第 ${cg.n} 卦 · ${cg.up}上${cg.dn}下</div>
-              <div class="c-move">本卦${yaoName}动（${mark}）而变</div>
+              <div class="c-move">本卦${moveDesc}动而变</div>
               <div class="c-bai">${cg.bai}</div>
+            </div>
+          </div>
+        </div>`;
+    } else if (info) {
+      changeHtml = `
+        <div class="block change">
+          <span class="tag">变 卦</span>
+          <div class="change-card">
+            <div class="c-info">
+              <div class="c-name">六爻皆静 · 无变卦</div>
+              <div class="c-bai">本卦即终卦，事情按本卦之意发展，无需另观变卦。</div>
             </div>
           </div>
         </div>`;
@@ -579,14 +656,15 @@
     const p = n => String(n).padStart(2, "0");
     return `${d.getMonth()+1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
-  function recordHistory(g, sourceLabel, movePos, changedG) {
+  function recordHistory(g, sourceLabel, moves, changedG) {
     const list = loadHistory();
     const src = sourceLabel === "今日之卦" ? "今日" : "随机";
     const last = list[0];
-    if (last && last.n === g.n && last.src === src && last.move === movePos) {
+    const sameMoves = (a, b) => JSON.stringify((a || []).slice().sort()) === JSON.stringify((b || []).slice().sort());
+    if (last && last.n === g.n && last.src === src && sameMoves(last.move, moves)) {
       last.t = Date.now();               // 去重：同一卦同来源同动爻，仅更新时间
     } else {
-      list.unshift({ t: Date.now(), n: g.n, name: g.name, s: g.s, yao: g.yao, src, move: movePos, cname: changedG.name });
+      list.unshift({ t: Date.now(), n: g.n, name: g.name, s: g.s, yao: g.yao, src, move: moves || [], cname: changedG ? changedG.name : null });
     }
     if (list.length > 30) list.length = 30;
     saveHistory(list);
@@ -604,7 +682,7 @@
         <div class="h-sym">${r.s}</div>
         <div>
           <div class="h-name">${r.name}卦</div>
-          <div class="h-meta">第 ${r.n} 卦${r.cname ? " · 变 " + r.cname + "卦" : ""}</div>
+          <div class="h-meta">第 ${r.n} 卦${r.cname ? " · 变 " + r.cname + "卦" : (Array.isArray(r.move) && r.move.length === 0 ? " · 静卦" : "")}</div>
         </div>
         <div class="h-right">
           <span class="h-src">${r.src === "今日" ? "今日之卦" : "随机起卦"}</span>
@@ -620,14 +698,17 @@
   }
   function viewHistory(rec) {
     const g = GUA[rec.n - 1];
-    const movePos = rec.move || 1;
-    const changedG = GUA_BY_YAO[flipYao(g.yao, movePos)];
-    renderGua(g, rec.src === "今日" ? "今日之卦" : "随机起卦", { movePos, changedG });
+    let moves = [];
+    if (Array.isArray(rec.move)) moves = rec.move;
+    else if (typeof rec.move === "number") moves = [rec.move];   // 兼容旧版单动爻
+    const changedG = moves.length ? GUA_BY_YAO[flipMulti(g.yao, moves)] : null;
+    renderGua(g, rec.src === "今日" ? "今日之卦" : "随机起卦", { moves, changedG });
   }
 
   function resetVisual() {
     digitEls.forEach(el => { el.textContent = "–"; el.classList.remove("on"); });
     yaoEls.forEach(el => { el.classList.remove("show", "yin", "moving"); });
+    document.getElementById("hexMove").textContent = "";
     rightPanel.classList.add("empty");
     rightPanel.innerHTML = `<div class="placeholder"><span class="glyph">䷀</span>${mode === "daily" ? "点击「查看今日卦」，诚心起卦" : "点击「随机起卦」，诚心起卦"}</div>`;
   }
@@ -636,18 +717,11 @@
     startBtn.disabled = true;
     resetVisual();
 
-    let target, movePos;
-    if (mode === "daily") {
-      target = dailyIndex();
-      movePos = dailyMove();
-    } else {
-      target = Math.floor(Math.random() * 64);
-      movePos = Math.floor(Math.random() * 6) + 1;
-    }
     const sourceLabel = mode === "daily" ? "今日之卦" : "随机起卦";
-    const g = GUA[target];
-    const finalBits = g.yao.split("");               // 直接用卦的六爻
-    const changedG = GUA_BY_YAO[flipYao(g.yao, movePos)];
+    const cast = mode === "daily" ? dailyCast() : castHex();
+    const g = GUA_BY_YAO[cast.yao];
+    const finalBits = cast.yao.split("");
+    const changedG = cast.moves.length ? GUA_BY_YAO[flipMulti(cast.yao, cast.moves)] : null;
 
     // 滚动特效：快速随机翻动数字
     let tick = 0;
@@ -675,8 +749,8 @@
           }, i * 140);
         });
         setTimeout(() => {
-          renderGua(g, sourceLabel, { movePos, changedG });
-          recordHistory(g, sourceLabel, movePos, changedG);
+          renderGua(g, sourceLabel, { moves: cast.moves, changedG });
+          recordHistory(g, sourceLabel, cast.moves, changedG);
         }, finalBits.length * 140 + 120);
         setTimeout(() => { startBtn.disabled = false; }, finalBits.length * 140 + 300);
       }
