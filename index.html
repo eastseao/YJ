@@ -402,7 +402,7 @@
     </div>
   </div>
 
-  <div class="footer">EastSeaO · 六十四卦 · 每日一卦按当日日期定卦 · 随机起卦 0–63 对应文王卦序 · 卦辞据《周易》通行本</div>
+  <div class="footer">六十四卦 · 每日一卦按本机独立生成（不同设备卦象不同）· 随机起卦 · 卦辞据《周易》通行本</div>
 
 <script>
   // 六十四卦数据（文王序）。yao 为六爻，自下而上，1=阳 0=阴；bai 为白话解读。
@@ -487,10 +487,27 @@
   document.getElementById("today").textContent =
     `${now.getFullYear()} 年 ${now.getMonth()+1} 月 ${now.getDate()} 日 · 星期${week}`;
 
-  // 每日一卦：以年月日为种子，FNV-1a 哈希，当天恒定、跨天变化。
+  // 用户唯一标识（localStorage 持久化）：不同浏览器/设备生成不同 uid，
+  // 使「每日一卦」按人独立——同一浏览器当天固定、跨天变化，不同人卦象不同。
+  function getUid() {
+    let uid = null;
+    try { uid = localStorage.getItem("gua_uid"); } catch (e) {}
+    if (!uid) {
+      if (window.crypto && typeof crypto.randomUUID === "function") {
+        try { uid = crypto.randomUUID(); } catch (e) {}
+      }
+      if (!uid) {
+        uid = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      }
+      try { localStorage.setItem("gua_uid", uid); } catch (e) {}
+    }
+    return uid;
+  }
+
+  // 每日一卦：以「用户 uid + 年月日」为种子，FNV-1a 哈希，按人独立、当天恒定、跨天变化。
   function dailyHash() {
     const d = new Date();
-    const key = `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+    const key = getUid() + "|" + `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
     let h = 2166136261 >>> 0;
     for (let i = 0; i < key.length; i++) {
       h ^= key.charCodeAt(i);
