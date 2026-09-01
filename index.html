@@ -659,7 +659,7 @@
           <div class="h-meta">第 ${r.n} 卦${r.cname ? " · 变 " + r.cname + "卦" : (Array.isArray(r.move) && r.move.length === 0 ? " · 静卦" : "")}</div>
         </div>
         <div class="h-right">
-          <span class="h-src">${r.src === "今日" ? "今日之卦" : "随机起卦"}</span>
+          <span class="h-src">随机起卦</span>
           <span class="h-time">${fmtTime(r.t)}</span>
         </div>
       </div>`).join("");
